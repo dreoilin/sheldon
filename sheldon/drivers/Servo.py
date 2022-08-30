@@ -1,3 +1,4 @@
+from time import sleep
 import numpy as np
 
 # might need to move these out of here... ?
@@ -5,29 +6,32 @@ import numpy as np
 TILT_SPECS = {
     'PWM_RANGE' : (553, 2270),
     'DEG_PER_USEC' : 0.105,
-    'ROTATION_MAX' : 180,
+    'STEP_DIVISOR' : 10000,
+    'ROTATION_LIMS' : (-30, 178),
     'DEADBAND_WIDTH' : 8,
-    'OFFSET' : 0.0
+    'OFFSET' : 2.0
 }
 
 PAN_SPECS = {
     'PWM_RANGE' : (750, 2250),
     'DEG_PER_USEC' : 0.119,
-    'ROTATION_MAX' : 178,
+    'STEP_DIVISOR' : 100,
+    'ROTATION_LIMS' : (-90, 180),
     'DEADBAND_WIDTH' : 2,
     'OFFSET' : 0.0
 }
 
 class Servo:
-    def __init__(self, rm = None, pin = 'P0', **kwargs):
+    def __init__(self, rm = None, pin = 0, **kwargs):
         self.__rm = rm
         self.__pin = pin
         kwargs =  {k.upper(): v for k, v in kwargs.items()}
         self.__PWM_RANGE = kwargs.get('PWM_RANGE', (0.0, 1.0))
         self.__DEG_PER_USEC = kwargs.get('DEG_PER_USEC', 0.1)
-        self.__ROTATION_MAX = kwargs.get('ROTATION_MAX', 90.0)
+        self.__ROTATION_LIMS = kwargs.get('ROTATION_LIMS', (-90, 90.0))
         self.__DEADBAND_WIDTH_USEC = kwargs.get('DEADBAND_WIDTH', 8)
         self.__OFFSET = kwargs.get('OFFSET', 0.0)
+        self.__STEP_DIVISOR = kwargs.get('STEP_DIVISOR', 100)
 
     def _deg2usec(self, deg):
 
@@ -47,17 +51,34 @@ class Servo:
         return float(deg_p_m_90)
 
     def write(self, usecs):
-        return self.__rm.write(f"M280 {self.__pin} S{usecs}")
+        return self.__rm.write(f"M280 P{self.__pin} S{usecs}")
 
-    def rotate(self, deg):
-        pass
+    def __rotate(self, deg):
+        offset = self.__OFFSET
+        rmin, rmax = self.__ROTATION_LIMS
+        if ((rmax - 90 < deg) or (rmin > deg)):
+            raise ValueError(f"Error with provided angle: {rmin} < angle < {rmax}")
+        else:
+            usecs = self._deg2usec(deg+self.__OFFSET)
+            delta = abs(self._deg2usec(self.__angle) - usecs)
+            steps = np.around(np.linspace(self._deg2usec(self.__angle), usecs, np.rint(float(delta)/self.__STEP_DIVISOR).astype(int)+2))
+            for step, input_usecs in enumerate(steps):
+                self.write(input_usecs)
+                self.angle =input_usecs
+                sleep(0.5)
 
     def reset(self):
-        self.__angle = 0.0
-        # need to finish this function
-        
+        # may need to be class member variable
+        reset_angle = self.__OFFSET
+        usecs = self._deg2usec(usecs)
+        self.write(usecs)
+
+        self.__angle = reset_angle
+
+    # consider replacing with a memoized property with limits    
     @property
     def angle(self):
+        # deal with limits here...
         return self.__angle
 
     @angle.setter

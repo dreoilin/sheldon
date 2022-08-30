@@ -1,3 +1,3 @@
 from .VNA import VNA
-from .RAMBo import RAMBO
-from .Servo import Tilt, Pan
+from .RAMBo import RAMBo
+from .Servo import Servo

@@ -1,6 +1,12 @@
-from serial import Serial
 import logging
+import re
+import readline
+from asyncore import write
 from time import sleep
+
+import numpy as np
+from serial import Serial
+
 
 class RAMBo(Serial):
     def __init__(self, port = None, baudrate=250000, timeout=1.0, **kwargs):
@@ -11,6 +17,10 @@ class RAMBo(Serial):
         if not self.__startup():
             raise RuntimeError("Could not connect to RAMBo")
         logging.info("Successfully connected")
+        # should home x y here
+        # self.home()
+        # enter z offset here or home manually
+        self.__offset = np.array(0.0, 0.0, 0.0)
 
     def __startup(self):
         logging.info("Attempting to connect to RAMBo")
@@ -34,20 +44,61 @@ class RAMBo(Serial):
     def write_binary(self, msg):
         return super().write(msg)
 
+    def query(self, msg):
+        self.write(msg)
+        sleep(1)
+        return self.readline()
+
+    def query_binary(self, msg):
+        self.write_binary(msg)
+        sleep(1)
+        return self.readline_binary()
+
     @property
     def position3d(self):
-        # get and read 3d position of CNC
-        pass
-    
+        ret = self.query("M114")
+        ret = dict(re.findall('(\S+):(\S+)', ret)[0:3])
+        return np.array([ret['X'], ret['Y'], ret['Z']])
+
     @position3d.setter
-    def position3d(self, coordinate=(0.0, 0.0, 0.0) ):
-        X, Y, Z = coordinate
+    def position3d(self, coordinate=np.array([0.0, 0.0, 0.0]), **kwargs):
         # set position
-        pass
+        # case 1: query -> dealt with getter
+        # case 2: no change -> query getter and check abs -- would be nice to cache position
+        position = self.position3d
+        if not (position - coordinate).any():
+            logging.debug(f"No change in position from: X->{position[0]}, Y->{position[1]}, Z->{position[2]}")
+            return
+        
+        # case 3: movement
+        # move z
+        if not (position[2] - coordinate[2]):
+            logging.debug(f"Adjusting Z height from {position[2]} to {coordinate[2]}")
+            self.write(f"G0 F900 Z{coordinate[2]-self.__offset[2]}")
+            # await movement complete -> could be implemented as query ?
+            self.write("M400")
+        
+        deltaMax = max((position - coordinate)[0:2])
+        
+        # set acceleration
+        amax = 180
+        acc = min(np.rint(amax*deltaMax/5.0), amax)
+        self.write(f"M204 T{acc}")
+        logging.debug(f"Adjusting acceleration to {acc}")
+            
+        vmax = 3000 # mm/min
+        vel = min(kwargs.get('velocity', vmax), vmax)
+        
+        self.write(f"G0 F{vel} X{coordinate[0]} Y{coordinate[1]}")
+        self.write("M400")
+        
+        return
 
-    def home(self):
-        # home axes (currently only X and Y - third endstop?)
-        pass
+    def home(self, **kwargs):
+        defaults = {'X' : True, 'Y' : True, 'Z' : False}
+        homesets = {k:kwargs.get(k, v) for k,v in defaults}
 
-    
+        for axis,homeset in homesets:
+            self.write(f"G28 {axis}") if homeset else logging.info(f"Not homing {axis} axis")
+        
     
