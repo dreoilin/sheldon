@@ -32,6 +32,7 @@ class Servo:
         self.__DEADBAND_WIDTH_USEC = kwargs.get('DEADBAND_WIDTH', 8)
         self.__OFFSET = kwargs.get('OFFSET', 0.0)
         self.__STEP_DIVISOR = kwargs.get('STEP_DIVISOR', 100)
+        self.__angle = 0.0
 
     def _deg2usec(self, deg):
 

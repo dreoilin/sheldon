@@ -12,15 +12,14 @@ class RAMBo(Serial):
     def __init__(self, port = None, baudrate=250000, timeout=1.0, **kwargs):
         super().__init__(port, baudrate, timeout=timeout, **kwargs)
         logging.info("RAMBo found and and serial connection initiated")
-        logging.info("10 second delay for RAMBo startup")
-        sleep(10)
+        logging.info("3 second delay for RAMBo startup")
+        sleep(3)
         if not self.__startup():
             raise RuntimeError("Could not connect to RAMBo")
         logging.info("Successfully connected")
         # should home x y here
         # self.home()
         # enter z offset here or home manually
-        self.__offset = np.array(0.0, 0.0, 0.0)
 
     def __startup(self):
         logging.info("Attempting to connect to RAMBo")
@@ -28,15 +27,35 @@ class RAMBo(Serial):
         for i in range(1,MAX_ATTEMPTS+1):
             logging.info(f"Attempt {i} of {MAX_ATTEMPTS}")
             if self.readline() != "":
+                # empty buffer from input
+                self.read_buffer()
                 return True
         return False
-        
+
     def readline(self):
         # read ascii only
         return super().readline().decode('ascii')
 
     def readline_binary(self):
         return super().readline()
+
+    def read_buffer(self):
+        buf = ''
+        ret = self.readline()
+        while ret != '':
+            buf += ret
+            ret = self.readline()
+
+        return buf
+
+    def read_buffer_binary(self):
+        buf = b''
+        ret = self.readline_binary()
+        while ret != b'':
+            buf += ret
+            ret = self.readline_binary()
+        
+        return buf
 
     def write(self, msg):
         return super().write(msg.encode() + b'\n')
@@ -47,18 +66,18 @@ class RAMBo(Serial):
     def query(self, msg):
         self.write(msg)
         sleep(1)
-        return self.readline()
+        return self.read_buffer()
 
     def query_binary(self, msg):
         self.write_binary(msg)
         sleep(1)
-        return self.readline_binary()
+        return self.read_buffer_binary()
 
     @property
     def position3d(self):
         ret = self.query("M114")
         ret = dict(re.findall('(\S+):(\S+)', ret)[0:3])
-        return np.array([ret['X'], ret['Y'], ret['Z']])
+        return np.array([float(ret['X']), float(ret['Y']), float(ret['Z'])])
 
     @position3d.setter
     def position3d(self, coordinate=np.array([0.0, 0.0, 0.0]), **kwargs):
@@ -72,11 +91,11 @@ class RAMBo(Serial):
         
         # case 3: movement
         # move z
-        if not (position[2] - coordinate[2]):
+        if (position[2] - coordinate[2]):
             logging.debug(f"Adjusting Z height from {position[2]} to {coordinate[2]}")
-            self.write(f"G0 F900 Z{coordinate[2]-self.__offset[2]}")
+            self.query(f"G0 F900 Z{coordinate[2]}")
             # await movement complete -> could be implemented as query ?
-            self.write("M400")
+            self.query("M400")
         
         deltaMax = max((position - coordinate)[0:2])
         
@@ -89,16 +108,15 @@ class RAMBo(Serial):
         vmax = 3000 # mm/min
         vel = min(kwargs.get('velocity', vmax), vmax)
         
-        self.write(f"G0 F{vel} X{coordinate[0]} Y{coordinate[1]}")
-        self.write("M400")
+        self.query(f"G0 F{vel} X{coordinate[0]} Y{coordinate[1]}")
+        self.query("M400")
         
         return
 
     def home(self, **kwargs):
         defaults = {'X' : True, 'Y' : True, 'Z' : False}
-        homesets = {k:kwargs.get(k, v) for k,v in defaults}
+        homesets = {k:kwargs.get(k, v) for k,v in defaults.items()}
 
-        for axis,homeset in homesets:
-            self.write(f"G28 {axis}") if homeset else logging.info(f"Not homing {axis} axis")
-        
-    
+        for axis,homeset in homesets.items():
+            self.query(f"G28 {axis}") if homeset else logging.info(f"Not homing {axis} axis")
+
